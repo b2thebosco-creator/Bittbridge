@@ -8,22 +8,19 @@ This is the main miner file that integrates your predictive model with the Bitte
 The miner handles network communication, while your model handles predictions.
 
 To use this miner:
-1. Implement a model that inherits from PredictionModel (see model_interface.py)
-2. Instantiate your model
-3. Pass it to the Miner class
-4. Run the miner
+1. Create your model file in student_models/ folder (copy template.py)
+2. Fill in your model loading code
+3. Run the miner - it will auto-discover your model
 
 Example:
-    from example_models.simple_model import SimpleAPIModel
-    from miner_plugin import Miner
-    
-    model = SimpleAPIModel()
-    miner = Miner(config=None, model=model)
-    miner.run()
+    # Create student_models/my_model.py from template.py
+    # Fill in your model code
+    # Run: python -m miner_model.miner_plugin
 """
 
 import time
 import typing
+import sys
 import bittensor as bt
 
 # Bittensor Miner Template:
@@ -32,10 +29,8 @@ import bittbridge
 # Import base miner class which takes care of most of the boilerplate
 from bittbridge.base.miner import BaseMinerNeuron
 
-# Import the model interface and example model
+# Import the model interface
 from .model_interface import PredictionModel
-# Import the simple example model (fallback if no student model found)
-from .example_models.simple_model import SimpleAPIModel
 # Import auto-discovery utility
 from .utils.model_loader import load_student_model
 
@@ -66,36 +61,34 @@ class Miner(BaseMinerNeuron):
         
         Args:
             config: Bittensor configuration (will use defaults)
-            model: An instance of a PredictionModel. If None, uses SimpleAPIModel as default.
+            model: An instance of a PredictionModel. Required - no default fallback.
         
         Example:
-            # Use default simple model
-            miner = Miner()
-            
-            # Use your custom model
-            from my_models import MyCustomModel
-            my_model = MyCustomModel()
-            miner = Miner(model=my_model)
+            # Load your model from student_models/ folder
+            from .utils.model_loader import load_student_model
+            model = load_student_model()
+            miner = Miner(model=model)
         """
         super(Miner, self).__init__(config=config)
         
         # ============================================================
         # STEP 1: SETUP YOUR MODEL
         # ============================================================
-        # Replace SimpleAPIModel() with your own model instance.
         # Your model must implement the PredictionModel interface.
-        #
-        # Example:
-        #   from my_models import MyCustomModel
-        #   self.model = MyCustomModel()
+        # Create your model file in student_models/ folder using template.py
         #
         # ============================================================
         
         if model is None:
-            bt.logging.info("No model provided, using SimpleAPIModel as default")
-            self.model = SimpleAPIModel()
-        else:
-            self.model = model
+            raise ValueError(
+                "No model provided. Please create your model file in student_models/ folder.\n"
+                "Steps:\n"
+                "  1. Copy student_models/template.py to student_models/your_model.py\n"
+                "  2. Fill in SECTION 1 (load your model) and SECTION 2 (load your data)\n"
+                "  3. Run the miner again - it will auto-discover your model"
+            )
+        
+        self.model = model
         
         # Initialize the model (load weights, connect to APIs, etc.)
         if not self.model.initialize():
@@ -285,20 +278,25 @@ if __name__ == "__main__":
     # The miner will automatically find and load your model from
     # the student_models/ folder. Just put your model file there!
     #
-    # If no student model is found, it will use SimpleAPIModel as fallback.
+    # If no student model is found, the miner will exit with an error.
     # ============================================================
     
     # Try to load student model from student_models/ folder
     model = load_student_model()
     
-    # Fallback to simple example model if no student model found
+    # Raise error if no student model found
     if model is None:
-        bt.logging.info("No student model found, using SimpleAPIModel as fallback")
-        bt.logging.info("To use your own model:")
-        bt.logging.info("  1. Copy student_models/template.py to student_models/your_model.py")
-        bt.logging.info("  2. Fill in the 3 sections with your code from the notebook")
-        bt.logging.info("  3. Run the miner again")
-        model = SimpleAPIModel()
+        bt.logging.error("=" * 60)
+        bt.logging.error("ERROR: No student model found!")
+        bt.logging.error("=" * 60)
+        bt.logging.error("To create your model:")
+        bt.logging.error("  1. Copy student_models/template.py to student_models/your_model.py")
+        bt.logging.error("  2. Fill in SECTION 1 (load your model) and SECTION 2 (load your data)")
+        bt.logging.error("  3. Run the miner again")
+        bt.logging.error("")
+        bt.logging.error("See student_models/lstm_example.py for a complete example.")
+        bt.logging.error("=" * 60)
+        sys.exit(1)
     
     # Create and run the miner
     with Miner(model=model) as miner:

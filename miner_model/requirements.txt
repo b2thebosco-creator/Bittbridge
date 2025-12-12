@@ -2,7 +2,7 @@
 # Note: Core dependencies (bittensor, bittbridge) should be installed
 # from the main project requirements.txt
 
-# For API-based models (SimpleAPIModel example)
+# For API-based models (if your model uses external APIs)
 requests>=2.31.0
 
 # Optional: For advanced ML models

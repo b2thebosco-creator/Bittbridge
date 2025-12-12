@@ -56,12 +56,34 @@ def load_student_model() -> Optional[PredictionModel]:
     bt.logging.info(f"Found student model: {model_file}")
     
     try:
-        # Import the module
+        # Load the module using importlib.util to properly handle imports
+        # Set up the module with proper package context for relative imports
+        import sys
+        
+        # Get the file path
+        file_path = os.path.join(student_models_dir, model_file)
+        
+        # Create module spec
         spec = importlib.util.spec_from_file_location(
-            module_name,
-            os.path.join(student_models_dir, model_file)
+            f'miner_model.student_models.{module_name}',
+            file_path
         )
+        
+        if spec is None or spec.loader is None:
+            bt.logging.error(f"Could not create spec for {model_file}")
+            return None
+        
+        # Create module and set package attribute for relative imports
         module = importlib.util.module_from_spec(spec)
+        module.__package__ = 'miner_model.student_models'
+        module.__name__ = f'miner_model.student_models.{module_name}'
+        
+        # Add parent directory to sys.path if needed for absolute imports
+        parent_dir = os.path.dirname(student_models_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
+        # Execute the module
         spec.loader.exec_module(module)
         
         # Check if predict function exists

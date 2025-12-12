@@ -17,7 +17,7 @@ from .helpers import predict_1hour_ahead, prepare_dataframe
 # ============================================
 # Get the directory where this file is located
 current_dir = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(current_dir, '..', 'outside_model', 'lstm_model.h5')
+model_path = os.path.join(current_dir, '..', 'LSTM_outside_example', 'lstm_model.h5')
 
 # Load the model
 model = load_model(model_path, compile=False)
@@ -27,7 +27,7 @@ model = load_model(model_path, compile=False)
 # SECTION 2: Load Your Data  
 # ============================================
 # Path to your data file
-data_path = os.path.join(current_dir, '..', 'outside_model', 'USDT-CNY_scraper (2).csv')
+data_path = os.path.join(current_dir, '..', 'LSTM_outside_example', 'USDT-CNY_scraper (2).csv')
 
 # Load and prepare data using helper function
 df = pd.read_csv(data_path)
