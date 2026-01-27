@@ -1,9 +1,8 @@
 """
-YOUR MODEL NAME HERE
+My Model
 
-Copy this file and rename it to your_model.py
-No need to fill in anything - just place your .h5 model file and .csv data file
-in the miner_model directory, and this template will automatically find them!
+This file automatically discovers and loads your .h5 model file and .csv data file
+from the miner_model directory. Just place your files there and you're ready to go!
 The predict function is already provided - it uses the standard 1-hour-ahead pattern.
 """
 

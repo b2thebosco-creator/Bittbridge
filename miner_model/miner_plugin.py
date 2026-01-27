@@ -8,14 +8,13 @@ This is the main miner file that integrates your predictive model with the Bitte
 The miner handles network communication, while your model handles predictions.
 
 To use this miner:
-1. Create your model file in student_models/ folder (copy template.py)
-2. Fill in your model loading code
-3. Run the miner - it will auto-discover your model
+1. Place your .h5 model file and .csv data file in miner_model/ directory
+2. Run the miner - it will auto-discover your model and data files
 
 Example:
-    # Create student_models/my_model.py from template.py
-    # Fill in your model code
+    # Place your model.h5 and data.csv in miner_model/
     # Run: python -m miner_model.miner_plugin
+    # The my_model.py file will automatically find and load your files
 """
 
 import time
@@ -75,17 +74,19 @@ class Miner(BaseMinerNeuron):
         # STEP 1: SETUP YOUR MODEL
         # ============================================================
         # Your model must implement the PredictionModel interface.
-        # Create your model file in student_models/ folder using template.py
+        # The my_model.py file in student_models/ will automatically discover
+        # your .h5 and .csv files from the miner_model/ directory.
         #
         # ============================================================
         
         if model is None:
             raise ValueError(
-                "No model provided. Please create your model file in student_models/ folder.\n"
+                "No model provided. Please set up your model files.\n"
                 "Steps:\n"
-                "  1. Copy student_models/template.py to student_models/your_model.py\n"
-                "  2. Fill in SECTION 1 (load your model) and SECTION 2 (load your data)\n"
-                "  3. Run the miner again - it will auto-discover your model"
+                "  1. Place your .h5 model file in miner_model/ directory\n"
+                "  2. Place your .csv data file in miner_model/ directory\n"
+                "  3. Make sure student_models/my_model.py exists\n"
+                "  4. Run the miner again - it will auto-discover your files"
             )
         
         self.model = model
@@ -289,12 +290,13 @@ if __name__ == "__main__":
         bt.logging.error("=" * 60)
         bt.logging.error("ERROR: No student model found!")
         bt.logging.error("=" * 60)
-        bt.logging.error("To create your model:")
-        bt.logging.error("  1. Copy student_models/template.py to student_models/your_model.py")
-        bt.logging.error("  2. Fill in SECTION 1 (load your model) and SECTION 2 (load your data)")
-        bt.logging.error("  3. Run the miner again")
+        bt.logging.error("To set up your model:")
+        bt.logging.error("  1. Place your .h5 model file in miner_model/ directory")
+        bt.logging.error("  2. Place your .csv data file in miner_model/ directory")
+        bt.logging.error("  3. Make sure student_models/my_model.py exists (it should be in the repo)")
+        bt.logging.error("  4. Run the miner again")
         bt.logging.error("")
-        bt.logging.error("See student_models/lstm_example.py for a complete example.")
+        bt.logging.error("The my_model.py file will automatically find and load your files.")
         bt.logging.error("=" * 60)
         sys.exit(1)
     

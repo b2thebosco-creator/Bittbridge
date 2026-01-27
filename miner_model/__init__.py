@@ -4,9 +4,10 @@ Bittbridge Miner Model Plugin Package
 This package provides a plugin system for integrating predictive models with the Bittbridge subnet.
 
 Quick Start:
-    1. Copy student_models/template.py to student_models/your_model.py
-    2. Fill in the 3 sections with your code from notebook
-    3. Run: python -m miner_model.miner_plugin --netuid 420 --subtensor.network test ...
+    1. Place your .h5 model file and .csv data file in miner_model/ directory
+    2. Run: python -m miner_model.miner_plugin --netuid 420 --subtensor.network test ...
+    
+The my_model.py file will automatically discover and load your files.
 """
 
 from .model_interface import PredictionModel

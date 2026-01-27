@@ -17,8 +17,9 @@ def load_student_model() -> Optional[PredictionModel]:
     """
     Auto-discover and load student model from student_models/ folder.
     
-    Looks for .py files (excluding template.py and __init__.py) and loads
+    Looks for .py files (excluding helpers.py and __init__.py) and loads
     the first one found. Expects a predict() function in the module.
+    The default model file is my_model.py which is ready to use.
     
     Returns:
         PredictionModel instance, or None if no model found
@@ -36,8 +37,9 @@ def load_student_model() -> Optional[PredictionModel]:
         bt.logging.error(f"Student models directory not found: {student_models_dir}")
         return None
     
-    # Find Python files (excluding template, helpers, examples, and __init__)
-    excluded_files = ['template.py', '__init__.py', 'helpers.py', 'lstm_example.py']
+    # Find Python files (excluding helpers and __init__)
+    # Note: my_model.py is the default model file that students can use directly
+    excluded_files = ['__init__.py', 'helpers.py']
     model_files = []
     for file in os.listdir(student_models_dir):
         if file.endswith('.py') and file not in excluded_files:
@@ -46,7 +48,7 @@ def load_student_model() -> Optional[PredictionModel]:
     if not model_files:
         bt.logging.error(
             "No student model found in student_models/ folder.\n"
-            "Please copy template.py to your_model.py and fill in your code."
+            "The default my_model.py should be present. If you deleted it, restore it from the repository."
         )
         return None
     
@@ -113,7 +115,7 @@ def list_available_models() -> list:
     List all available student models.
     
     Returns:
-        List of model file names (excluding template.py)
+        List of model file names (excluding helpers.py and __init__.py)
     """
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     student_models_dir = os.path.join(current_dir, 'student_models')
@@ -121,7 +123,7 @@ def list_available_models() -> list:
     if not os.path.exists(student_models_dir):
         return []
     
-    excluded_files = ['template.py', '__init__.py', 'helpers.py', 'lstm_example.py']
+    excluded_files = ['__init__.py', 'helpers.py']
     models = []
     for file in os.listdir(student_models_dir):
         if file.endswith('.py') and file not in excluded_files:
