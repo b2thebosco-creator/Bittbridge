@@ -36,10 +36,11 @@ def load_student_model() -> Optional[PredictionModel]:
         bt.logging.error(f"Student models directory not found: {student_models_dir}")
         return None
     
-    # Find Python files (excluding template and __init__)
+    # Find Python files (excluding template, helpers, examples, and __init__)
+    excluded_files = ['template.py', '__init__.py', 'helpers.py', 'lstm_example.py']
     model_files = []
     for file in os.listdir(student_models_dir):
-        if file.endswith('.py') and file not in ['template.py', '__init__.py']:
+        if file.endswith('.py') and file not in excluded_files:
             model_files.append(file)
     
     if not model_files:
@@ -120,9 +121,10 @@ def list_available_models() -> list:
     if not os.path.exists(student_models_dir):
         return []
     
+    excluded_files = ['template.py', '__init__.py', 'helpers.py', 'lstm_example.py']
     models = []
     for file in os.listdir(student_models_dir):
-        if file.endswith('.py') and file not in ['template.py', '__init__.py']:
+        if file.endswith('.py') and file not in excluded_files:
             models.append(file)
     
     return models
