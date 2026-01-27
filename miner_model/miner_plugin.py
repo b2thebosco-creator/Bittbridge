@@ -98,7 +98,7 @@ class Miner(BaseMinerNeuron):
                 "Miner will continue but predictions may fail."
             )
         else:
-            bt.logging.success("Model initialized successfully")
+            bt.logging.success("!!!!! Model initialized successfully !!!!!")
 
     async def forward(self, synapse: bittbridge.protocol.Challenge) -> bittbridge.protocol.Challenge:
         """
