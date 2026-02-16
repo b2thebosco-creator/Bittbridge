@@ -206,8 +206,8 @@ async def metagraph_resync_scheduler(validator, resync_interval=600):
 async def prediction_scheduler(validator):
     # Set your prediction interval (in minutes)
     prediction_interval = 5  # Query miners every 5 minutes
-    # Initialize timestamp to current time, rounded to interval
-    timestamp = to_str(round_to_interval(get_now(), interval_minutes=prediction_interval))
+    # Initialize timestamp in the past so the first query happens immediately.
+    timestamp = to_str(get_before(get_now(), minutes=prediction_interval))
     while True:
         query_lag = elapsed_seconds(get_now(), to_datetime(timestamp))
         # Only query if it's the start of a new epoch or lag is too large

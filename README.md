@@ -289,7 +289,15 @@ ifconfig | grep inet
 
 **Step 4: Restart your miner with explicit port**
 ```bash
-python neurons/miner.py --Axon.port 8091 --Axon.external_port 8091 --netuid 420
+python -m neurons.miner \
+	--netuid 420 \
+	--subtensor.network test \
+	--wallet.name YOUR_MINER_NAME \
+	--wallet.hotkey YOUR_MINER_HOTKEY_NAME \
+	--axon.port 8091 \
+	--axon.external_port 8091 \
+	--axon.external_ip YOUR_PUBLIC_VM_IP \
+	--logging.debug
 ```
 
 ### Alternative: Use Different Ports
@@ -297,10 +305,24 @@ python neurons/miner.py --Axon.port 8091 --Axon.external_port 8091 --netuid 420
 If your ISP blocks certain ports, try:
 ```bash
 # Common ports that are usually open
-python neurons/miner.py --Axon.port 80 --Axon.external_port 80 --netuid 420
-python neurons/miner.py --Axon.port 8080 --Axon.external_port 8080 --netuid 420
-python neurons/miner.py --Axon.port 443 --Axon.external_port 443 --netuid 420
+python -m neurons.miner --netuid 420 --subtensor.network test --wallet.name YOUR_MINER_NAME --wallet.hotkey YOUR_MINER_HOTKEY_NAME --axon.port 80 --axon.external_port 80 --axon.external_ip YOUR_PUBLIC_VM_IP
+python -m neurons.miner --netuid 420 --subtensor.network test --wallet.name YOUR_MINER_NAME --wallet.hotkey YOUR_MINER_HOTKEY_NAME --axon.port 8080 --axon.external_port 8080 --axon.external_ip YOUR_PUBLIC_VM_IP
+python -m neurons.miner --netuid 420 --subtensor.network test --wallet.name YOUR_MINER_NAME --wallet.hotkey YOUR_MINER_HOTKEY_NAME --axon.port 443 --axon.external_port 443 --axon.external_ip YOUR_PUBLIC_VM_IP
 ```
+
+### VM / Cloud Firewall Checklist
+
+If you are running on a VM, port forwarding on a home router is usually not the issue. Check cloud/network rules instead:
+
+- Open inbound TCP on your miner port (for example `8091`) in your cloud firewall/security group.
+- Open inbound TCP on your miner port in the VM OS firewall (`ufw`/`iptables`).
+- Confirm miner is listening on all interfaces:
+
+```bash
+ss -ltnp | grep 8091
+```
+
+- Confirm your announced IP matches the VM public IP (`--axon.external_ip`).
 
 ### Testing Connectivity
 
