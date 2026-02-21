@@ -55,19 +55,22 @@ jobs:
           ssh -i ~/.ssh/id_rsa ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} bash -lc "'
             set -euo pipefail
 
+            # Fail fast if sudo would prompt (non-interactive workflow)
+            sudo -n true
+
             sudo apt-get update
             sudo apt-get install -y git python3 python3-venv python3-pip rsync
 
             sudo mkdir -p /opt/bittbridge
             sudo chown -R $USER:$USER /opt/bittbridge
 
-            if [ ! -d \"$REPO_DIR/.git\" ]; then
-              git clone --branch \"$BRANCH\" \"https://github.com/$REPO_SLUG.git\" \"$REPO_DIR\"
+            if [ ! -d \"'$REPO_DIR'/.git\" ]; then
+              git clone --branch \"'$BRANCH'\" \"https://github.com/'$REPO_SLUG'.git\" \"'$REPO_DIR'\"
             fi
 
-            cd \"$REPO_DIR\"
+            cd \"'$REPO_DIR'\"
             git fetch origin
-            git checkout \"$BRANCH\"
+            git checkout \"'$BRANCH'\"
             git pull --ff-only
 
             if [ ! -d venv ]; then
@@ -103,9 +106,9 @@ jobs:
             [Service]
             Type=simple
             User=$USER
-            WorkingDirectory=$REPO_DIR
+            WorkingDirectory='$REPO_DIR'
             EnvironmentFile=/etc/bittbridge/bittbridge.env
-            ExecStart=$REPO_DIR/venv/bin/python -m miner_model.miner_plugin \\
+            ExecStart='$REPO_DIR'/venv/bin/python -m miner_model.miner_plugin \\
               --netuid 420 \\
               --subtensor.network test \\
               --wallet.name \${MINER_WALLET_NAME} \\
@@ -127,9 +130,9 @@ jobs:
             [Service]
             Type=simple
             User=$USER
-            WorkingDirectory=$REPO_DIR
+            WorkingDirectory='$REPO_DIR'
             EnvironmentFile=/etc/bittbridge/bittbridge.env
-            ExecStart=$REPO_DIR/venv/bin/python -m neurons.validator \\
+            ExecStart='$REPO_DIR'/venv/bin/python -m neurons.validator \\
               --netuid 420 \\
               --subtensor.network test \\
               --wallet.name \${VALIDATOR_WALLET_NAME} \\
@@ -154,7 +157,8 @@ jobs:
           test -d miner_model
           ls -1 miner_model/*.h5 >/dev/null
 
-          sudo apt-get update && sudo apt-get install -y rsync
+          # Avoid apt install of rsync (can fail on runner images). Expect rsync to exist.
+          command -v rsync
 
           REPO_DIR="/opt/bittbridge/Bittbridge"
 
