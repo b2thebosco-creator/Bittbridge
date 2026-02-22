@@ -51,7 +51,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Create remote bootstrap script locally (no SSH heredocs; avoids indentation pitfalls)
           cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
@@ -76,75 +75,101 @@ jobs:
             python3 -m venv venv
           fi
 
-          # Intentionally do NOT run `pip install .` (packaging imports pkg_resources on py3.13)
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
           sudo mkdir -p /etc/bittbridge
-          sudo tee /etc/bittbridge/bittbridge.env >/dev/null <<'EOF'
-SUBTENSOR_NETWORK=test
-NETUID=420
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          import os
 
-MINER_WALLET_NAME=${MINER_WALLET_NAME:-miner}
-MINER_HOTKEY_NAME=${MINER_HOTKEY_NAME:-default}
+          env_txt = """SUBTENSOR_NETWORK=test
+          NETUID=420
 
-VALIDATOR_WALLET_NAME=${VALIDATOR_WALLET_NAME:-validator}
-VALIDATOR_HOTKEY_NAME=${VALIDATOR_HOTKEY_NAME:-default}
+          MINER_WALLET_NAME={miner_wallet}
+          MINER_HOTKEY_NAME={miner_hotkey}
 
-COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
-WANDB_API_KEY=${WANDB_API_KEY:-}
-EOF
+          VALIDATOR_WALLET_NAME={validator_wallet}
+          VALIDATOR_HOTKEY_NAME={validator_hotkey}
+
+          COINGECKO_API_KEY={coingecko}
+          WANDB_API_KEY={wandb}
+          """.format(
+              miner_wallet=os.environ.get("MINER_WALLET_NAME") or "miner",
+              miner_hotkey=os.environ.get("MINER_HOTKEY_NAME") or "default",
+              validator_wallet=os.environ.get("VALIDATOR_WALLET_NAME") or "validator",
+              validator_hotkey=os.environ.get("VALIDATOR_HOTKEY_NAME") or "default",
+              coingecko=os.environ.get("COINGECKO_API_KEY") or "",
+              wandb=os.environ.get("WANDB_API_KEY") or "",
+          )
+
+          Path("/etc/bittbridge/bittbridge.env").write_text(env_txt)
+          PY
           sudo chmod 600 /etc/bittbridge/bittbridge.env
           sudo chown root:root /etc/bittbridge/bittbridge.env
 
-          # IMPORTANT: do NOT escape ${...} in ExecStart; systemd will expand from EnvironmentFile
-          sudo tee /etc/systemd/system/bittbridge-miner.service >/dev/null <<EOF
-[Unit]
-Description=Bittbridge Miner (miner_model.miner_plugin)
-After=network-online.target
-Wants=network-online.target
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          import os
 
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$REPO_DIR
-EnvironmentFile=/etc/bittbridge/bittbridge.env
-ExecStart=$REPO_DIR/venv/bin/python -m miner_model.miner_plugin \\
-  --netuid 420 \\
-  --subtensor.network test \\
-  --wallet.name \${MINER_WALLET_NAME:-miner} \\
-  --wallet.hotkey \${MINER_HOTKEY_NAME:-default} \\
-  --logging.debug
-Restart=always
-RestartSec=5
+          repo_dir = os.environ["REPO_DIR"]
+          user = os.environ.get("USER", "root")
 
-[Install]
-WantedBy=multi-user.target
-EOF
+          # Build literal systemd env-var references without ever writing "${{"
+          miner_wallet = "${" + "MINER_WALLET_NAME" + "}"
+          miner_hotkey = "${" + "MINER_HOTKEY_NAME" + "}"
+          validator_wallet = "${" + "VALIDATOR_WALLET_NAME" + "}"
+          validator_hotkey = "${" + "VALIDATOR_HOTKEY_NAME" + "}"
 
-          sudo tee /etc/systemd/system/bittbridge-validator.service >/dev/null <<EOF
-[Unit]
-Description=Bittbridge Validator (neurons.validator)
-After=network-online.target
-Wants=network-online.target
+          miner_unit = f"""[Unit]
+          Description=Bittbridge Miner (miner_model.miner_plugin)
+          After=network-online.target
+          Wants=network-online.target
 
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$REPO_DIR
-EnvironmentFile=/etc/bittbridge/bittbridge.env
-ExecStart=$REPO_DIR/venv/bin/python -m neurons.validator \\
-  --netuid 420 \\
-  --subtensor.network test \\
-  --wallet.name \${VALIDATOR_WALLET_NAME:-validator} \\
-  --wallet.hotkey \${VALIDATOR_HOTKEY_NAME:-default} \\
-  --logging.debug
-Restart=always
-RestartSec=5
+          [Service]
+          Type=simple
+          User={user}
+          WorkingDirectory={repo_dir}
+          EnvironmentFile=/etc/bittbridge/bittbridge.env
+          ExecStart={repo_dir}/venv/bin/python -m miner_model.miner_plugin \\
+            --netuid 420 \\
+            --subtensor.network test \\
+            --wallet.name {miner_wallet} \\
+            --wallet.hotkey {miner_hotkey} \\
+            --logging.debug
+          Restart=always
+          RestartSec=5
 
-[Install]
-WantedBy=multi-user.target
-EOF
+          [Install]
+          WantedBy=multi-user.target
+          """
+
+          validator_unit = f"""[Unit]
+          Description=Bittbridge Validator (neurons.validator)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={user}
+          WorkingDirectory={repo_dir}
+          EnvironmentFile=/etc/bittbridge/bittbridge.env
+          ExecStart={repo_dir}/venv/bin/python -m neurons.validator \\
+            --netuid 420 \\
+            --subtensor.network test \\
+            --wallet.name {validator_wallet} \\
+            --wallet.hotkey {validator_hotkey} \\
+            --logging.debug
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+          """
+
+          Path("/etc/systemd/system/bittbridge-miner.service").write_text(miner_unit)
+          Path("/etc/systemd/system/bittbridge-validator.service").write_text(validator_unit)
+          PY
 
           sudo systemctl daemon-reload
           sudo systemctl enable --now bittbridge-miner bittbridge-validator
