@@ -25,15 +25,32 @@ jobs:
       - name: Checkout (needed for deploy action)
         uses: actions/checkout@v4
 
-      - name: Configure SSH
+      - name: Configure SSH (preserve key exactly)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+
+          # Write the private key exactly as stored in the secret (multi-line safe)
+          cat > ~/.ssh/id_rsa <<'EOF'
+          ${{ secrets.VM_SSH_KEY }}
+          EOF
+          # remove any CRLF that may have been introduced
+          sed -i 's/\r$//' ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+
+          # Sanity-check the key parses
+          ssh-keygen -lf ~/.ssh/id_rsa
+
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: SSH debug (temporary)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -vvv -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "echo ok"
 
       - name: Bootstrap VM (/opt, venv, deps, systemd, env keys)
         if: ${{ inputs.action == 'bootstrap' }}
@@ -51,6 +68,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Create remote bootstrap script locally (no SSH heredocs)
           cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
@@ -78,6 +96,7 @@ jobs:
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
+          # Write env file with current values (no systemd var expansion needed)
           sudo mkdir -p /etc/bittbridge
           sudo python3 - <<'PY'
           from pathlib import Path
@@ -108,6 +127,7 @@ jobs:
           sudo chmod 600 /etc/bittbridge/bittbridge.env
           sudo chown root:root /etc/bittbridge/bittbridge.env
 
+          # IMPORTANT: pass concrete wallet/hotkey values (avoid ${VAR} parsing issues)
           sudo python3 - <<'PY'
           from pathlib import Path
           import os
@@ -115,18 +135,10 @@ jobs:
           repo_dir = os.environ["REPO_DIR"]
           user = os.environ.get("USER", "root")
 
-          DOLLAR = chr(36)   # $
-          LBRACE = chr(123)  # {
-          RBRACE = chr(125)  # }
-
-          def envref(name: str) -> str:
-              # returns ${NAME} without writing '${' in the workflow YAML
-              return DOLLAR + LBRACE + name + RBRACE
-
-          miner_wallet = envref("MINER_WALLET_NAME")
-          miner_hotkey = envref("MINER_HOTKEY_NAME")
-          validator_wallet = envref("VALIDATOR_WALLET_NAME")
-          validator_hotkey = envref("VALIDATOR_HOTKEY_NAME")
+          miner_wallet = os.environ.get("MINER_WALLET_NAME") or "miner"
+          miner_hotkey = os.environ.get("MINER_HOTKEY_NAME") or "default"
+          validator_wallet = os.environ.get("VALIDATOR_WALLET_NAME") or "validator"
+          validator_hotkey = os.environ.get("VALIDATOR_HOTKEY_NAME") or "default"
 
           miner_unit = f"""[Unit]
           Description=Bittbridge Miner (miner_model.miner_plugin)
@@ -184,7 +196,7 @@ jobs:
 
           PAYLOAD_B64="$(base64 -w0 /tmp/bittbridge-bootstrap.sh)"
 
-          ssh -i ~/.ssh/id_rsa "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
             "REPO_SLUG='${REPO_SLUG}' BRANCH='${BRANCH}' REPO_DIR='${REPO_DIR}' \
              COINGECKO_API_KEY='${COINGECKO_API_KEY}' WANDB_API_KEY='${WANDB_API_KEY}' \
              MINER_WALLET_NAME='${MINER_WALLET_NAME}' MINER_HOTKEY_NAME='${MINER_HOTKEY_NAME}' \
@@ -214,7 +226,7 @@ jobs:
               ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:"$REPO_DIR/miner_model/"
           fi
 
-          ssh -i ~/.ssh/id_rsa ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
             "sudo systemctl restart bittbridge-miner bittbridge-validator"
 
       - name: Logs (miner + validator)
@@ -223,7 +235,7 @@ jobs:
         run: |
           set -euo pipefail
           LINES="${{ inputs.log_lines }}"
-          ssh -i ~/.ssh/id_rsa ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
             "echo '--- MINER STATUS ---'; sudo systemctl --no-pager -l status bittbridge-miner || true; \
              echo '--- VALIDATOR STATUS ---'; sudo systemctl --no-pager -l status bittbridge-validator || true; \
              echo '--- MINER LOGS ---'; sudo journalctl -u bittbridge-miner -n ${LINES} --no-pager || true; \
