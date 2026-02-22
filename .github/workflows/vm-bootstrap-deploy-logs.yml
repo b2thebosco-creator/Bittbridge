@@ -80,7 +80,7 @@ jobs:
             python3 -m venv venv
           fi
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
-          ./venv/bin/pip install --no-build-isolation -e .
+          ./venv/bin/pip install --no-build-isolation .
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
           sudo mkdir -p /etc/bittbridge
