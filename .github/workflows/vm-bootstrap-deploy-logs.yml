@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Create a remote bootstrap script locally
+          # Create remote bootstrap script locally (no SSH heredocs; avoids indentation pitfalls)
           cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
@@ -82,74 +82,74 @@ jobs:
 
           sudo mkdir -p /etc/bittbridge
           sudo tee /etc/bittbridge/bittbridge.env >/dev/null <<'EOF'
-          SUBTENSOR_NETWORK=test
-          NETUID=420
+SUBTENSOR_NETWORK=test
+NETUID=420
 
-          MINER_WALLET_NAME=${MINER_WALLET_NAME:-miner}
-          MINER_HOTKEY_NAME=${MINER_HOTKEY_NAME:-default}
+MINER_WALLET_NAME=${MINER_WALLET_NAME:-miner}
+MINER_HOTKEY_NAME=${MINER_HOTKEY_NAME:-default}
 
-          VALIDATOR_WALLET_NAME=${VALIDATOR_WALLET_NAME:-validator}
-          VALIDATOR_HOTKEY_NAME=${VALIDATOR_HOTKEY_NAME:-default}
+VALIDATOR_WALLET_NAME=${VALIDATOR_WALLET_NAME:-validator}
+VALIDATOR_HOTKEY_NAME=${VALIDATOR_HOTKEY_NAME:-default}
 
-          COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
-          WANDB_API_KEY=${WANDB_API_KEY:-}
-          EOF
+COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+WANDB_API_KEY=${WANDB_API_KEY:-}
+EOF
           sudo chmod 600 /etc/bittbridge/bittbridge.env
           sudo chown root:root /etc/bittbridge/bittbridge.env
 
+          # IMPORTANT: do NOT escape ${...} in ExecStart; systemd will expand from EnvironmentFile
           sudo tee /etc/systemd/system/bittbridge-miner.service >/dev/null <<EOF
-          [Unit]
-          Description=Bittbridge Miner (miner_model.miner_plugin)
-          After=network-online.target
-          Wants=network-online.target
+[Unit]
+Description=Bittbridge Miner (miner_model.miner_plugin)
+After=network-online.target
+Wants=network-online.target
 
-          [Service]
-          Type=simple
-          User=$USER
-          WorkingDirectory=$REPO_DIR
-          EnvironmentFile=/etc/bittbridge/bittbridge.env
-          ExecStart=$REPO_DIR/venv/bin/python -m miner_model.miner_plugin \\
-            --netuid 420 \\
-            --subtensor.network test \\
-            --wallet.name \${MINER_WALLET_NAME} \\
-            --wallet.hotkey \${MINER_HOTKEY_NAME} \\
-            --logging.debug
-          Restart=always
-          RestartSec=5
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$REPO_DIR
+EnvironmentFile=/etc/bittbridge/bittbridge.env
+ExecStart=$REPO_DIR/venv/bin/python -m miner_model.miner_plugin \\
+  --netuid 420 \\
+  --subtensor.network test \\
+  --wallet.name \${MINER_WALLET_NAME:-miner} \\
+  --wallet.hotkey \${MINER_HOTKEY_NAME:-default} \\
+  --logging.debug
+Restart=always
+RestartSec=5
 
-          [Install]
-          WantedBy=multi-user.target
-          EOF
+[Install]
+WantedBy=multi-user.target
+EOF
 
           sudo tee /etc/systemd/system/bittbridge-validator.service >/dev/null <<EOF
-          [Unit]
-          Description=Bittbridge Validator (neurons.validator)
-          After=network-online.target
-          Wants=network-online.target
+[Unit]
+Description=Bittbridge Validator (neurons.validator)
+After=network-online.target
+Wants=network-online.target
 
-          [Service]
-          Type=simple
-          User=$USER
-          WorkingDirectory=$REPO_DIR
-          EnvironmentFile=/etc/bittbridge/bittbridge.env
-          ExecStart=$REPO_DIR/venv/bin/python -m neurons.validator \\
-            --netuid 420 \\
-            --subtensor.network test \\
-            --wallet.name \${VALIDATOR_WALLET_NAME} \\
-            --wallet.hotkey \${VALIDATOR_HOTKEY_NAME} \\
-            --logging.debug
-          Restart=always
-          RestartSec=5
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$REPO_DIR
+EnvironmentFile=/etc/bittbridge/bittbridge.env
+ExecStart=$REPO_DIR/venv/bin/python -m neurons.validator \\
+  --netuid 420 \\
+  --subtensor.network test \\
+  --wallet.name \${VALIDATOR_WALLET_NAME:-validator} \\
+  --wallet.hotkey \${VALIDATOR_HOTKEY_NAME:-default} \\
+  --logging.debug
+Restart=always
+RestartSec=5
 
-          [Install]
-          WantedBy=multi-user.target
-          EOF
+[Install]
+WantedBy=multi-user.target
+EOF
 
           sudo systemctl daemon-reload
           sudo systemctl enable --now bittbridge-miner bittbridge-validator
           SCRIPT
 
-          # Base64 encode to avoid heredoc/indentation issues over SSH
           PAYLOAD_B64="$(base64 -w0 /tmp/bittbridge-bootstrap.sh)"
 
           ssh -i ~/.ssh/id_rsa "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
