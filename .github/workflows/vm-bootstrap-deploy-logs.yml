@@ -51,15 +51,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          ssh -i ~/.ssh/id_rsa "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
-            "REPO_SLUG='${REPO_SLUG}' BRANCH='${BRANCH}' REPO_DIR='${REPO_DIR}' \
-             COINGECKO_API_KEY='${COINGECKO_API_KEY}' WANDB_API_KEY='${WANDB_API_KEY}' \
-             MINER_WALLET_NAME='${MINER_WALLET_NAME}' MINER_HOTKEY_NAME='${MINER_HOTKEY_NAME}' \
-             VALIDATOR_WALLET_NAME='${VALIDATOR_WALLET_NAME}' VALIDATOR_HOTKEY_NAME='${VALIDATOR_HOTKEY_NAME}' \
-             bash -s" <<'REMOTE'
+          # Create a remote bootstrap script locally
+          cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
-          # Fail fast if sudo would prompt (non-interactive workflow)
           sudo -n true
 
           sudo apt-get update
@@ -76,15 +71,17 @@ jobs:
           git fetch origin
           git checkout "$BRANCH"
           git pull --ff-only
+
           if [ ! -d venv ]; then
             python3 -m venv venv
           fi
+
+          # Intentionally do NOT run `pip install .` (packaging imports pkg_resources on py3.13)
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
-          ./venv/bin/pip install --no-build-isolation .
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
           sudo mkdir -p /etc/bittbridge
-          sudo tee /etc/bittbridge/bittbridge.env >/dev/null <<EOF
+          sudo tee /etc/bittbridge/bittbridge.env >/dev/null <<'EOF'
           SUBTENSOR_NETWORK=test
           NETUID=420
 
@@ -150,7 +147,17 @@ jobs:
 
           sudo systemctl daemon-reload
           sudo systemctl enable --now bittbridge-miner bittbridge-validator
-          REMOTE
+          SCRIPT
+
+          # Base64 encode to avoid heredoc/indentation issues over SSH
+          PAYLOAD_B64="$(base64 -w0 /tmp/bittbridge-bootstrap.sh)"
+
+          ssh -i ~/.ssh/id_rsa "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+            "REPO_SLUG='${REPO_SLUG}' BRANCH='${BRANCH}' REPO_DIR='${REPO_DIR}' \
+             COINGECKO_API_KEY='${COINGECKO_API_KEY}' WANDB_API_KEY='${WANDB_API_KEY}' \
+             MINER_WALLET_NAME='${MINER_WALLET_NAME}' MINER_HOTKEY_NAME='${MINER_HOTKEY_NAME}' \
+             VALIDATOR_WALLET_NAME='${VALIDATOR_WALLET_NAME}' VALIDATOR_HOTKEY_NAME='${VALIDATOR_HOTKEY_NAME}' \
+             bash -lc 'echo ${PAYLOAD_B64} | base64 -d > /tmp/bittbridge-bootstrap.sh && bash /tmp/bittbridge-bootstrap.sh'"
 
       - name: Deploy miner_model/ and restart services
         if: ${{ inputs.action == 'deploy' }}
