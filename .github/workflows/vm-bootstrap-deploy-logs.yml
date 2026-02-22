@@ -115,11 +115,18 @@ jobs:
           repo_dir = os.environ["REPO_DIR"]
           user = os.environ.get("USER", "root")
 
-          # Build literal systemd env-var references without ever writing "${{"
-          miner_wallet = "${" + "MINER_WALLET_NAME" + "}"
-          miner_hotkey = "${" + "MINER_HOTKEY_NAME" + "}"
-          validator_wallet = "${" + "VALIDATOR_WALLET_NAME" + "}"
-          validator_hotkey = "${" + "VALIDATOR_HOTKEY_NAME" + "}"
+          DOLLAR = chr(36)   # $
+          LBRACE = chr(123)  # {
+          RBRACE = chr(125)  # }
+
+          def envref(name: str) -> str:
+              # returns ${NAME} without writing '${' in the workflow YAML
+              return DOLLAR + LBRACE + name + RBRACE
+
+          miner_wallet = envref("MINER_WALLET_NAME")
+          miner_hotkey = envref("MINER_HOTKEY_NAME")
+          validator_wallet = envref("VALIDATOR_WALLET_NAME")
+          validator_hotkey = envref("VALIDATOR_HOTKEY_NAME")
 
           miner_unit = f"""[Unit]
           Description=Bittbridge Miner (miner_model.miner_plugin)
