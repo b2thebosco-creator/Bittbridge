@@ -16,36 +16,43 @@ on:
         description: "How many log lines to show (logs action only)"
         required: true
         default: "200"
+      ssh_debug:
+        description: "Enable verbose SSH debug output (prints lots of connection details)"
+        required: false
+        default: "false"
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (needed for deploy action)
+      # Only needed for deploy (so we have miner_model/ locally)
+      - name: Checkout (deploy only)
+        if: ${{ inputs.action == 'deploy' }}
         uses: actions/checkout@v4
 
-      - name: Configure SSH (preserve key exactly)
+      - name: Configure SSH (write key safely + known_hosts)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          # Write the private key exactly as stored in the secret (multi-line safe)
-          cat > ~/.ssh/id_rsa <<'EOF'
-          ${{ secrets.VM_SSH_KEY }}
-          EOF
-          # remove any CRLF that may have been introduced
+          # Write the private key EXACTLY (avoid heredoc indentation corrupting the key)
+          printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+          # Normalize potential CRLF
           sed -i 's/\r$//' ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
           # Sanity-check the key parses
-          ssh-keygen -lf ~/.ssh/id_rsa
+          ssh-keygen -lf ~/.ssh/id_rsa >/dev/null
 
+          # Pin host key (consider replacing keyscan with a pre-pinned known_hosts secret for best security)
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-      - name: SSH debug (temporary)
+      - name: SSH debug (optional)
+        if: ${{ inputs.ssh_debug == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -68,7 +75,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Create remote bootstrap script locally (no SSH heredocs)
+          # Create bootstrap script locally, then stream it to remote via stdin (simpler than base64 + quoting)
           cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
@@ -78,7 +85,9 @@ jobs:
           sudo apt-get install -y git python3 python3-venv python3-pip rsync
 
           sudo mkdir -p /opt/bittbridge
-          sudo chown -R "$USER:$USER" /opt/bittbridge
+          # Use the SSH user (SUDO_USER) when available; fallback to current user
+          OWNER_USER="${SUDO_USER:-$USER}"
+          sudo chown -R "$OWNER_USER:$OWNER_USER" /opt/bittbridge
 
           if [ ! -d "$REPO_DIR/.git" ]; then
             git clone --branch "$BRANCH" "https://github.com/$REPO_SLUG.git" "$REPO_DIR"
@@ -86,7 +95,9 @@ jobs:
 
           cd "$REPO_DIR"
           git fetch origin
-          git checkout "$BRANCH"
+
+          # Be robust even if branch isn't currently checked out locally
+          git checkout -B "$BRANCH" "origin/$BRANCH"
           git pull --ff-only
 
           if [ ! -d venv ]; then
@@ -96,7 +107,7 @@ jobs:
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
-          # Write env file with current values (no systemd var expansion needed)
+          # Write env file with current values
           sudo mkdir -p /etc/bittbridge
           sudo python3 - <<'PY'
           from pathlib import Path
@@ -127,13 +138,15 @@ jobs:
           sudo chmod 600 /etc/bittbridge/bittbridge.env
           sudo chown root:root /etc/bittbridge/bittbridge.env
 
-          # IMPORTANT: pass concrete wallet/hotkey values (avoid ${VAR} parsing issues)
+          # Create systemd units with concrete wallet/hotkey values
           sudo python3 - <<'PY'
           from pathlib import Path
           import os
 
           repo_dir = os.environ["REPO_DIR"]
-          user = os.environ.get("USER", "root")
+
+          # Prefer the SSH login user for systemd service user
+          service_user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
 
           miner_wallet = os.environ.get("MINER_WALLET_NAME") or "miner"
           miner_hotkey = os.environ.get("MINER_HOTKEY_NAME") or "default"
@@ -147,7 +160,7 @@ jobs:
 
           [Service]
           Type=simple
-          User={user}
+          User={service_user}
           WorkingDirectory={repo_dir}
           EnvironmentFile=/etc/bittbridge/bittbridge.env
           ExecStart={repo_dir}/venv/bin/python -m miner_model.miner_plugin \\
@@ -170,7 +183,7 @@ jobs:
 
           [Service]
           Type=simple
-          User={user}
+          User={service_user}
           WorkingDirectory={repo_dir}
           EnvironmentFile=/etc/bittbridge/bittbridge.env
           ExecStart={repo_dir}/venv/bin/python -m neurons.validator \\
@@ -194,14 +207,12 @@ jobs:
           sudo systemctl enable --now bittbridge-miner bittbridge-validator
           SCRIPT
 
-          PAYLOAD_B64="$(base64 -w0 /tmp/bittbridge-bootstrap.sh)"
-
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
             "REPO_SLUG='${REPO_SLUG}' BRANCH='${BRANCH}' REPO_DIR='${REPO_DIR}' \
              COINGECKO_API_KEY='${COINGECKO_API_KEY}' WANDB_API_KEY='${WANDB_API_KEY}' \
              MINER_WALLET_NAME='${MINER_WALLET_NAME}' MINER_HOTKEY_NAME='${MINER_HOTKEY_NAME}' \
              VALIDATOR_WALLET_NAME='${VALIDATOR_WALLET_NAME}' VALIDATOR_HOTKEY_NAME='${VALIDATOR_HOTKEY_NAME}' \
-             bash -lc 'echo ${PAYLOAD_B64} | base64 -d > /tmp/bittbridge-bootstrap.sh && bash /tmp/bittbridge-bootstrap.sh'"
+             bash -s" < /tmp/bittbridge-bootstrap.sh
 
       - name: Deploy miner_model/ and restart services
         if: ${{ inputs.action == 'deploy' }}
@@ -213,20 +224,13 @@ jobs:
 
           REPO_DIR="/opt/bittbridge/Bittbridge"
 
-          if command -v rsync >/dev/null 2>&1; then
-            rsync -az --delete \
-              -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes" \
-              miner_model/ \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:"$REPO_DIR/miner_model/"
-          else
-            ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $REPO_DIR/miner_model"
-            scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes -r \
-              miner_model/* \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:"$REPO_DIR/miner_model/"
-          fi
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes" \
+            miner_model/ \
+            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$REPO_DIR/miner_model/"
 
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
             "sudo systemctl restart bittbridge-miner bittbridge-validator"
 
       - name: Logs (miner + validator)
@@ -235,7 +239,7 @@ jobs:
         run: |
           set -euo pipefail
           LINES="${{ inputs.log_lines }}"
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
             "echo '--- MINER STATUS ---'; sudo systemctl --no-pager -l status bittbridge-miner || true; \
              echo '--- VALIDATOR STATUS ---'; sudo systemctl --no-pager -l status bittbridge-validator || true; \
              echo '--- MINER LOGS ---'; sudo journalctl -u bittbridge-miner -n ${LINES} --no-pager || true; \
