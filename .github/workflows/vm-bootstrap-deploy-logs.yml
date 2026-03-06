@@ -7,11 +7,14 @@ on:
         description: "bootstrap=install & create services, deploy=upload miner_model + restart, logs=show recent logs"
         required: true
         type: choice
-        options: [bootstrap, deploy, logs]
+        options:
+          - bootstrap
+          - deploy
+          - logs
       branch:
         description: "Branch to use on the VM (bootstrap only)"
         required: true
-        default: "main"
+        default: "baseminerMA_customscikit"
       log_lines:
         description: "How many log lines to show (logs action only)"
         required: true
@@ -24,40 +27,54 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
-      # Only needed for deploy (so we have miner_model/ locally)
       - name: Checkout (deploy only)
         if: ${{ inputs.action == 'deploy' }}
         uses: actions/checkout@v4
 
-      - name: Configure SSH (write key safely + known_hosts)
+      - name: Configure SSH (base64 key + known_hosts)
         shell: bash
+        env:
+          VM_SSH_KEY_B64: ${{ secrets.VM_SSH_KEY_B64 }}
+          VM_HOST: ${{ secrets.VM_HOST }}
         run: |
           set -euo pipefail
+
+          if [[ -z "${VM_SSH_KEY_B64:-}" ]]; then
+            echo "ERROR: VM_SSH_KEY_B64 secret is empty or not set."
+            exit 1
+          fi
+          if [[ -z "${VM_HOST:-}" ]]; then
+            echo "ERROR: VM_HOST secret is empty or not set."
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          # Write the private key EXACTLY (avoid heredoc indentation corrupting the key)
-          printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
-          # Normalize potential CRLF
-          sed -i 's/\r$//' ~/.ssh/id_rsa
+          # Decode base64 -> private key file (prevents newline/paste corruption)
+          echo "$VM_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-          # Sanity-check the key parses
-          ssh-keygen -lf ~/.ssh/id_rsa >/dev/null
+          # Validate key parses (fails if corrupted or encrypted)
+          ssh-keygen -y -f ~/.ssh/id_rsa >/dev/null
 
-          # Pin host key (consider replacing keyscan with a pre-pinned known_hosts secret for best security)
-          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+          # Host key pinning
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: SSH debug (optional)
         if: ${{ inputs.ssh_debug == 'true' }}
         shell: bash
+        env:
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_HOST: ${{ secrets.VM_HOST }}
         run: |
           set -euo pipefail
           ssh -vvv -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes \
-            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "echo ok"
+            "$VM_USER@$VM_HOST" "echo ok"
 
       - name: Bootstrap VM (/opt, venv, deps, systemd, env keys)
         if: ${{ inputs.action == 'bootstrap' }}
@@ -66,8 +83,13 @@ jobs:
           REPO_SLUG: ${{ github.repository }}
           BRANCH: ${{ inputs.branch }}
           REPO_DIR: /opt/bittbridge/Bittbridge
+
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
           MINER_WALLET_NAME: ${{ secrets.MINER_WALLET_NAME }}
           MINER_HOTKEY_NAME: ${{ secrets.MINER_HOTKEY_NAME }}
           VALIDATOR_WALLET_NAME: ${{ secrets.VALIDATOR_WALLET_NAME }}
@@ -75,7 +97,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Create bootstrap script locally, then stream it to remote via stdin (simpler than base64 + quoting)
           cat > /tmp/bittbridge-bootstrap.sh <<'SCRIPT'
           set -euo pipefail
 
@@ -85,7 +106,6 @@ jobs:
           sudo apt-get install -y git python3 python3-venv python3-pip rsync
 
           sudo mkdir -p /opt/bittbridge
-          # Use the SSH user (SUDO_USER) when available; fallback to current user
           OWNER_USER="${SUDO_USER:-$USER}"
           sudo chown -R "$OWNER_USER:$OWNER_USER" /opt/bittbridge
 
@@ -95,8 +115,6 @@ jobs:
 
           cd "$REPO_DIR"
           git fetch origin
-
-          # Be robust even if branch isn't currently checked out locally
           git checkout -B "$BRANCH" "origin/$BRANCH"
           git pull --ff-only
 
@@ -107,7 +125,6 @@ jobs:
           ./venv/bin/python -m pip install --upgrade pip setuptools wheel
           ./venv/bin/pip install bittensor bittensor-cli wandb pytz
 
-          # Write env file with current values
           sudo mkdir -p /etc/bittbridge
           sudo python3 - <<'PY'
           from pathlib import Path
@@ -138,14 +155,11 @@ jobs:
           sudo chmod 600 /etc/bittbridge/bittbridge.env
           sudo chown root:root /etc/bittbridge/bittbridge.env
 
-          # Create systemd units with concrete wallet/hotkey values
           sudo python3 - <<'PY'
           from pathlib import Path
           import os
 
           repo_dir = os.environ["REPO_DIR"]
-
-          # Prefer the SSH login user for systemd service user
           service_user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
 
           miner_wallet = os.environ.get("MINER_WALLET_NAME") or "miner"
@@ -154,7 +168,7 @@ jobs:
           validator_hotkey = os.environ.get("VALIDATOR_HOTKEY_NAME") or "default"
 
           miner_unit = f"""[Unit]
-          Description=Bittbridge Miner (miner_model.miner_plugin)
+          Description=Bittbridge Miner (neurons.miner)
           After=network-online.target
           Wants=network-online.target
 
@@ -163,7 +177,7 @@ jobs:
           User={service_user}
           WorkingDirectory={repo_dir}
           EnvironmentFile=/etc/bittbridge/bittbridge.env
-          ExecStart={repo_dir}/venv/bin/python -m miner_model.miner_plugin \\
+          ExecStart={repo_dir}/venv/bin/python -m neurons.miner \\
             --netuid 420 \\
             --subtensor.network test \\
             --wallet.name {miner_wallet} \\
@@ -207,7 +221,7 @@ jobs:
           sudo systemctl enable --now bittbridge-miner bittbridge-validator
           SCRIPT
 
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "$VM_USER@$VM_HOST" \
             "REPO_SLUG='${REPO_SLUG}' BRANCH='${BRANCH}' REPO_DIR='${REPO_DIR}' \
              COINGECKO_API_KEY='${COINGECKO_API_KEY}' WANDB_API_KEY='${WANDB_API_KEY}' \
              MINER_WALLET_NAME='${MINER_WALLET_NAME}' MINER_HOTKEY_NAME='${MINER_HOTKEY_NAME}' \
@@ -217,6 +231,9 @@ jobs:
       - name: Deploy miner_model/ and restart services
         if: ${{ inputs.action == 'deploy' }}
         shell: bash
+        env:
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_HOST: ${{ secrets.VM_HOST }}
         run: |
           set -euo pipefail
           test -d miner_model
@@ -227,19 +244,22 @@ jobs:
           rsync -az --delete \
             -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes" \
             miner_model/ \
-            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$REPO_DIR/miner_model/"
+            "$VM_USER@$VM_HOST:$REPO_DIR/miner_model/"
 
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes \
-            "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+            "$VM_USER@$VM_HOST" \
             "sudo systemctl restart bittbridge-miner bittbridge-validator"
 
       - name: Logs (miner + validator)
         if: ${{ inputs.action == 'logs' }}
         shell: bash
+        env:
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_HOST: ${{ secrets.VM_HOST }}
         run: |
           set -euo pipefail
           LINES="${{ inputs.log_lines }}"
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes "$VM_USER@$VM_HOST" \
             "echo '--- MINER STATUS ---'; sudo systemctl --no-pager -l status bittbridge-miner || true; \
              echo '--- VALIDATOR STATUS ---'; sudo systemctl --no-pager -l status bittbridge-validator || true; \
              echo '--- MINER LOGS ---'; sudo journalctl -u bittbridge-miner -n ${LINES} --no-pager || true; \
